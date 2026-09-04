@@ -82,7 +82,12 @@ open class TLSSocketFactory(
 
   private fun enableTLSOnSocket(socket: Socket): Socket {
     if (socket is SSLSocket) {
-      socket.enabledProtocols = arrayOf("TLSv1.1", "TLSv1.2")
+      // versus fork: TLSv1.1 was removed from the platform on Android 14+/16, and asking for a
+      // protocol the socket no longer supports makes setEnabledProtocols throw ("protocol TLSv1.1
+      // is not supported"), killing the RTMPS handshake. Enable only the modern protocols the
+      // socket actually supports — TLS 1.2 (always) and TLS 1.3 (API 29+).
+      val versusDesired = setOf("TLSv1.2", "TLSv1.3")
+      socket.enabledProtocols = socket.supportedProtocols.filter { it in versusDesired }.toTypedArray()
     }
     return socket
   }
