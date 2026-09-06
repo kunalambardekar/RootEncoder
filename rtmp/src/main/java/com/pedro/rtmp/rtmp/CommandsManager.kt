@@ -54,6 +54,13 @@ abstract class CommandsManager {
   var onAuth = false
   var incrementalTs = false
   var startTs = 0L
+  // VERSUS a/v-sync fix: rebase each track's FLV timestamp so audio and video BOTH start at 0.
+  // RootEncoder stamps the first audio packet ~200ms before the first video packet (encoder-startup
+  // latency, stamped as wall-clock PTS). Cloudflare Stream's transcoder collapses the recording to a
+  // fraction of wall-clock unless both tracks start near 0. -1 = uninitialised; captured on the first
+  // packet of each track, subtracted from every packet; cleared in reset().
+  private var videoBaseTs = -1L
+  private var audioBaseTs = -1L
   var readChunkSize = RtmpConfig.DEFAULT_CHUNK_SIZE
   var audioDisabled = false
   var videoDisabled = false
@@ -206,6 +213,9 @@ abstract class CommandsManager {
       if (incrementalTs) {
         flvPacket.timeStamp = ((TimeUtils.getCurrentTimeNano() / 1000 - startTs) / 1000)
       }
+      // VERSUS: rebase video track so its first FLV timestamp is 0 (see videoBaseTs).
+      if (videoBaseTs < 0) videoBaseTs = flvPacket.timeStamp
+      flvPacket.timeStamp -= videoBaseTs
       val video = Video(flvPacket, streamId)
       video.writeHeader(output)
       video.writeBody(output)
@@ -221,6 +231,9 @@ abstract class CommandsManager {
       if (incrementalTs) {
         flvPacket.timeStamp = ((TimeUtils.getCurrentTimeNano() / 1000 - startTs) / 1000)
       }
+      // VERSUS: rebase audio track so its first FLV timestamp is 0 (see audioBaseTs).
+      if (audioBaseTs < 0) audioBaseTs = flvPacket.timeStamp
+      flvPacket.timeStamp -= audioBaseTs
       val audio = Audio(flvPacket, streamId)
       audio.writeHeader(output)
       audio.writeBody(output)
@@ -237,6 +250,8 @@ abstract class CommandsManager {
 
   fun reset() {
     startTs = 0
+    videoBaseTs = -1L
+    audioBaseTs = -1L
     timestamp = 0
     streamId = 0
     commandId = 0
