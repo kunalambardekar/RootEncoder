@@ -61,6 +61,11 @@ abstract class CommandsManager {
   // packet of each track, subtracted from every packet; cleared in reset().
   private var videoBaseTs = -1L
   private var audioBaseTs = -1L
+  // VERSUS avsync2: last emitted (rebased) video FLV timestamp, to force the video timeline strictly
+  // monotonic. MediaCodec occasionally stamps a frame a few ms before its predecessor; Cloudflare's
+  // live packager assumes forward-only PTS and fails to build the recording ("missing or invalid
+  // data") when back-jumps cluster. -1 = uninitialised; cleared in reset().
+  private var lastVideoTs = -1L
   var readChunkSize = RtmpConfig.DEFAULT_CHUNK_SIZE
   var audioDisabled = false
   var videoDisabled = false
@@ -216,6 +221,11 @@ abstract class CommandsManager {
       // VERSUS: rebase video track so its first FLV timestamp is 0 (see videoBaseTs).
       if (videoBaseTs < 0) videoBaseTs = flvPacket.timeStamp
       flvPacket.timeStamp -= videoBaseTs
+      // VERSUS avsync2: clamp the video timeline strictly monotonic (see lastVideoTs). A back-jumped
+      // frame is pushed to lastVideoTs+1; the next in-order frame (larger ts) resets the ceiling, so
+      // this does not accumulate drift. Video only — audio keeps its own rebase (avsync1 A/V offset).
+      if (flvPacket.timeStamp <= lastVideoTs) flvPacket.timeStamp = lastVideoTs + 1
+      lastVideoTs = flvPacket.timeStamp
       val video = Video(flvPacket, streamId)
       video.writeHeader(output)
       video.writeBody(output)
@@ -252,6 +262,7 @@ abstract class CommandsManager {
     startTs = 0
     videoBaseTs = -1L
     audioBaseTs = -1L
+    lastVideoTs = -1L
     timestamp = 0
     streamId = 0
     commandId = 0
